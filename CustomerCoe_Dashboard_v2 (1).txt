@@ -1,0 +1,853 @@
+import sys
+
+
+no_of_cpu = 8
+max_cores = 16
+executor_mem = '56g'
+
+
+
+Job_Name = 'Nishant:CPA-Customermart'
+
+from pyspark.mllib.stat import Statistics
+from pyspark.sql.functions import asc,lit
+#warnings.filterwarnings('error')
+import pyspark
+from datetime import datetime,timedelta
+from pyspark.sql import SQLContext
+from pyspark import SparkContext, SparkConf
+from pyspark.sql import functions as F
+
+
+conf = pyspark.SparkConf()
+#import numpy
+import calendar
+#import pandas as pd
+#import simplejson as json
+#import pandas as pd
+import numpy as np
+import datetime
+from pyspark.sql.functions import *
+from pyspark.sql.types import DateType
+from pyspark.sql.functions import lit
+import simplejson as json
+import json, pprint, requests
+#es_nodes = '10.35.12.5'
+#es_nodes = '10.35.12.6'
+es_nodes = '10.35.12.194'#,10.35.12.6,10.35.12.5
+es_nodes_temp='10.35.12.194'
+es_port = '5432'
+es_user = ''
+es_pwd = ''
+mesos_ip = 'mesos://10.33.195.18:5050'#'mesos://10.35.12.5:5050'
+
+spark.stop() #############NEED TO COMMENT THIS SPARK.STOP WHEN RUNNING THROUGH SHELL###############################
+
+conf.setMaster(mesos_ip)
+
+conf.set('spark.executor.cores',no_of_cpu) ### change 1
+conf.set('spark.memory.fraction','.2')
+conf.set('spark.driver.maxResultSize','1g')
+conf.set('spark.executor.memory',executor_mem) 
+conf.set('spark.es.scroll.size','10000')
+conf.set('spark.network.timeout','600s')
+conf.set('spark.sql.crossJoin.enabled', 'true')
+
+conf.set('spark.ui.port','4052')
+
+conf.set('spark.executor.heartbeatInterval','60s')
+conf.set("spark.driver.cores","4")
+## changed from 4g to 2g
+conf.set("spark.driver.extraJavaOptions","-Xmx4g -Xms4g")
+
+#conf.set("spark.shuffle.blockTransferService", "nio"); 
+conf.set("spark.files.overwrite","true");
+conf.set("spark.kryoserializer.buffer", "70"); 
+#conf.set("spark.driver.extraJavaOptions", "-XX:+UseG1GC");
+conf.set("spark.executor.extraJavaOptions", "-XX:+UseG1GC");
+conf.set("spark.serializer", "org.apache.spark.serializer.KryoSerializer"); 
+conf.set("spark.broadcast.compress", "true"); 
+conf.set("spark.shuffle.compress", "true"); 
+conf.set("spark.shuffle.spill.compress", "true");
+conf.set("spark.app.name", Job_Name)
+#conf.set("spark.io.compression.codec","org.apache.spark.io.LZ4CompressionCodec");
+#uncommented below
+conf.set("spark.sql.inMemoryColumnarStorage.compressed", "true"); 
+from pyspark.sql.functions import broadcast
+
+conf.set('spark.driver.memory','20g') ### change 2
+conf.set('spark.cores.max',max_cores) ### change 3
+conf.set('spark.sql.shuffle.partitions','200')
+#conf.set('spark.sql.crossJoin.enabled', 'true')
+conf.set('es.nodes',es_nodes)
+conf.set('es.port',es_port)
+conf.set('es.nodes.wan.only','true')
+conf.set("spark.sql.autoBroadcastJoinThreshold",-1)
+
+#conf.set('spark.es.net.http.auth.user','Spark')
+#conf.set('spark.es.net.http.auth.pass','Jarkpet1Sap3')
+conf.set('spark.num.executors','4')
+conf.set('spark.debug.maxToStringFields', 200)
+
+conf.set('spark.es.net.http.auth.user', es_user)
+conf.set('spark.es.net.http.auth.pass', es_pwd)
+
+conf.set('spark.es.mapping.date.rich','false')
+spark = pyspark.SparkContext(conf=conf)
+sqlContext = SQLContext(spark)
+
+# Load Data into PySpark DataFrames
+# Prodcom Data Frame
+import json, pprint, requests
+import pyspark.sql.functions as sf
+from pyspark.sql.types import *
+
+
+import numpy as np
+import datetime
+from pyspark.sql.functions import *
+from pyspark.sql.types import DateType
+
+
+
+from pyspark.sql.functions import hash
+import numpy as np
+import datetime
+from pyspark.sql.functions import *
+from pyspark.sql.types import DateType
+import psycopg2
+import time
+from time import gmtime, strftime
+import pytz
+starttime = time.time()
+start_time = datetime.datetime.now(pytz.timezone('Asia/Kolkata')).strftime("%Y-%m-%d %H:%M:%S.%f")
+start_time
+
+prod_url = "jdbc:postgresql://10.35.12.194:5432/gpadmin"
+prod_host = '10.35.12.194'
+prod_port = '5432'
+prod_dbname = 'gpadmin'
+user_prod="gpcustcoe"
+pwd_prod="gpcustcoe@123"
+dbschema="public"
+
+
+prod_gpdb_spark_options ={
+    "url": "jdbc:postgresql://{host}:{port}/{dbname}".format(host=prod_host,port=prod_port, dbname=prod_dbname),
+    "user": "{user}".format(user=user_prod),
+    "password": "{password}".format(password=pwd_prod)
+} 
+
+# loading table as dataframe
+def load_gpdb_jdbc(col_str,dbtable,dbschema,col_name=None,time_filter=None,partitionColumn="row_num"):
+    """
+    This is used to read gpdb with filter for columns and can apply other filter(date,values).
+    Time filter contains startdate,enddate
+    """
+    gscPythonOptions = {
+                        "url": prod_url,
+                        "user": user_prod,
+                        "password": pwd_prod,
+                        "dbschema": dbschema,
+                        "dbtable": dbtable,
+                        "partitionColumn":partitionColumn,
+                        "partitions": 8,
+                        "server.port":"1150-1170"}
+   
+    if time_filter:
+        data = sqlContext.read.format("greenplum").options(**gscPythonOptions).load()\
+                .selectExpr(col_str).drop_duplicates().filter(col(col_name).between(to_timestamp(lit(time_filter['start_date']),
+                                                                 format='yyyy-MM-dd'),
+                                                    to_timestamp(lit(time_filter['end_date']),
+                                                                 format='yyyy-MM-dd')))
+    else :
+        data = sqlContext.read.format("greenplum").options(**gscPythonOptions).load()\
+                .selectExpr(col_str).drop_duplicates()
+   
+    return data
+
+# lst=['TWOWHEELERPOLICYINSURANCE',
+# 'MOTORTWOWHEELERPOLICY',
+# 'CRITIMEDICARE',
+# 'REVISEDHOMESECURE',
+# # 'BHARATGRIHARAKSHA',
+# 'MAHARAKSHA',
+# 'SECUREDFUTUREPLAN',
+# 'ACCIDENTGUARD',
+# 'ACCIDENTSHIELD',
+# 'ACCIDENTGUARDPLUS',
+# 'DOMESTICTRAVELGUARD',
+# 'STUDENTGUARD',
+# 'TRAVELGUARDWITHOUTSUBLIMIT',
+# 'ASIATRAVELGUARD',
+# 'TRAVELGUARDWITHSUBLIMIT',
+# 'PROTECT - MEDICARE',
+# 'MEDICAREPLUS',
+# 'PREMIER - MEDICARE',
+# 'MEDICARE',
+# 'PRIVATECARINSURANCEPOLICY',
+# 'MOTORPRIVATECARPOLICYINSURANCE',
+# 'STANDALONECPA']
+
+lst=['AIGC',
+'Aviation',
+'CV',
+'CVTP',
+'Casualty',
+'Cattle',
+'Construction',
+'EW',
+'Energy',
+'Fin. Lines',
+'GPA',
+'Gadget Care',
+'Group EMI Protect',
+'Group Health',
+'Group Health Direct',
+'Group Health RETAIL',
+'Group Hospi Cash',
+'Group health RETAIL',
+'Marine',
+'Property',
+'RSBY',
+'Weather']
+
+gscPythonOptions = {
+"url": "jdbc:postgresql://10.35.12.194:5432/gpadmin",
+"user": "gpcustcoe",
+"password": "gpcustcoe@123",
+"dbschema":"customermart",
+"dbtable": "policy_retail",#policy_retail_staging_211123
+"server.port": "1151-1171"}
+pr_df = sqlContext.read.format("greenplum").options(**gscPythonOptions).load()\
+.filter(~(col('lob').isin(lst))).filter(col('pol_incept_date') >='2019-04-01').filter(col('pol_incept_date') <=current_date())\
+.filter(col('lob').isNotNull())\
+.filter(~(upper(col('product_name')).isin('GROUPTRAVELSECURE',
+'GROUPOVERSEASTRAVELGUARD',
+'GROUPDOMESTICTRAVELGUARDPOLICY',
+'GROUPCREDITSECUREPLUS',
+'GROUPCREDITSECURE',
+'GROUPBUSINESSTRAVELACCIDENT')))
+
+pr_df=pr_df.withColumn('certificate_no',when((col('certificate_no').isin('0','0.0','/00000','000000','00000000'))|(col('certificate_no').isNull()),lit('00000000')).otherwise(lit(col('certificate_no'))))\
+.withColumn('policy_number',lpad(col('policy_number'),10,'0'))
+
+# pr_df.filter(col('pol_incept_date') >='2022-04-01').filter(col('pol_incept_date') <='2023-03-31')\
+# .filter(col('channel_new_2')=='E-Business')\
+# .groupBy('lob').agg(countDistinct('policy_number')).show()
+
+col_str=['claim_feature_concat','account_line_cd','claim_status','policy_no as policy_number','pol_incept_date','pol_exp_date',
+'certificate_no','claim_no','paid_amt_ind as claim_gross','report']
+
+gscPythonOptions = {
+"url": "jdbc:postgresql://10.35.12.194:5432/gpadmin",
+"user": "gpcustcoe",
+"password": "gpcustcoe@123",
+"dbschema":"datamarts",
+"dbtable": "producer_policy_product_wise_base_data",
+"server.port": "1151-1171"}
+df_crp = sqlContext.read.format("greenplum").options(**gscPythonOptions).load()\
+         .selectExpr(col_str)\
+.filter(col('account_line_cd').isin('50'))
+
+#df_crp=df_crp.groupby('num_reference_no').agg(countDistinct(col('claim_no')).alias('claim_cnt'),sum(col('claim_gross').cast('double')).alias('claim_gross'))
+
+df_crp.columns
+
+
+df_crp=df_crp.withColumn('certificate_no',when((col('certificate_no').isin('0','0.0','/00000','000000','00000000'))|(col('certificate_no').isNull()),lit('00000000')).otherwise(lit(col('certificate_no'))))\
+.withColumn('policy_number',lpad(col('policy_number'),10,'0'))
+
+df_crp=df_crp.withColumn('pol_incept_date',to_date(col('pol_incept_date'),'dd-MM-yyyy'))\
+.withColumn('pol_exp_date',to_date(col('pol_exp_date'),'dd-MM-yyyy'))
+
+group_cols = ["policy_number","certificate_no",'pol_incept_date','pol_exp_date']
+
+df_crp1=df_crp.groupBy(group_cols).agg(sum("claim_gross").alias("claim_gross"),countDistinct(col('claim_no')).alias('claim_cnt'))
+
+pr_df=pr_df.join(df_crp1,group_cols,'left')
+
+from pyspark.sql.window import Window
+
+w = Window.partitionBy(['policy_number','certificate_no','pol_incept_date','pol_exp_date','source_system_name']).orderBy([F.col('commit_timestamp').desc(),F.col('reference_num').desc()])
+pr_df = pr_df.withColumn('row',F.row_number().over(w))
+pr_df = pr_df.filter(F.col('row')==1).drop(pr_df.row).drop_duplicates()
+
+
+pol=pr_df.repartition('source_system_customer_id')
+
+pol.columns
+
+col_str=["golden_id", 'source_system_customer_id','active_flag','mapping_date']
+
+gscPythonOptions = {
+"url": "jdbc:postgresql://10.35.12.194:5432/gpadmin",
+"user": "gpcustcoe",
+"password": "gpcustcoe@123",
+"dbschema":"customermart",
+"dbtable": "header",
+"server.port": "1151-1171"}
+header_retail = sqlContext.read.format("greenplum").options(**gscPythonOptions).load()\
+         .selectExpr(col_str).drop_duplicates().filter(col('active_flag')==1)
+
+header_retail=header_retail.drop('active_flag')
+
+col_str=["golden_id", 'source_system_customer_id','active_flag','mapping_date']
+
+gscPythonOptions = {
+"url": "jdbc:postgresql://10.35.12.194:5432/gpadmin",
+"user": "gpcustcoe",
+"password": "gpcustcoe@123",
+"dbschema":"customermart",
+"dbtable": "header_corp",
+"server.port": "1151-1171"}
+header_corp = sqlContext.read.format("greenplum").options(**gscPythonOptions).load()\
+         .selectExpr(col_str).drop_duplicates().filter(col('active_flag')==1)
+
+header_corp=header_corp.drop('active_flag')
+
+header_corp=header_corp.withColumn('golden_id',concat(col('golden_id'),lit('999999')))#99999 for corp as there could be common gid for ratil and corp
+
+header=header_retail.union(header_corp)
+
+from pyspark.sql.window import Window
+
+header = header.withColumn("rn", F.row_number()
+        .over(Window.partitionBy("source_system_customer_id")
+        .orderBy(F.col("mapping_date").desc())))
+
+header = header.filter(F.col("rn") == 1).drop("rn").drop('mapping_date')
+
+header.repartition('source_system_customer_id')
+
+mot_hlt=pol.join(header, 'source_system_customer_id',"left_outer")
+
+tenure_df=mot_hlt.groupBy('golden_id').agg(max('pol_exp_date').alias('max_policy_end_date'))
+
+mot_hlt=mot_hlt.join(tenure_df,'golden_id','left')
+
+mot_hlt=mot_hlt.withColumn('customer_vintage',datediff(col('max_policy_end_date'),col('min_pol_incept_date')))
+
+col_str=['communication_type','value','source_system_customer_id']
+gscPythonOptions = {
+"url": "jdbc:postgresql://10.35.12.194:5432/gpadmin",
+"user": "gpcustcoe",
+"password": "gpcustcoe@123",
+"dbschema":"customermart",
+"dbtable": "contactability",
+"server.port": "1151-1171"}
+contactibility = sqlContext.read.format("greenplum").options(**gscPythonOptions).load()\
+         .selectExpr(col_str).drop_duplicates()
+
+contactibility.columns
+
+contactibility=contactibility.repartition('source_system_customer_id')
+
+contactibility = contactibility.withColumn('value',when((lower(trim(col("value"))).rlike("^[a-z0-9]+[\._]?[a-z0-9]+[@]\w+[.]\w+$") == False)\
+                                                        & (lower(trim(col("communication_type")))=='email'),lit(None)).otherwise(col('value')))
+
+
+mot_hlt=mot_hlt.join(contactibility,'source_system_customer_id',"left_outer")
+
+mot_hlt.createOrReplaceTempView('mot_hlt_tbl')
+
+query1 = """
+select golden_id,max(mobile_contactibility) mobile_contactibility ,max(email_contactibility)  email_contactibility from (
+select distinct golden_id, case when   communication_type in ('phone','Phone') and value is not null then 1 else 0 end mobile_contactibility,
+case when communication_type in ('Email','email') and value is not null then 1 else 0 end email_contactibility
+from mot_hlt_tbl c) as a group by golden_id"""
+
+contact_df = sqlContext.sql(query1)
+sqlContext.dropTempTable('mot_hlt_tbl')
+
+mot_hlt=mot_hlt.join(contact_df,'golden_id',"left_outer")
+
+col_str=['golden_id','birth_date','gender','marital_status','tobacco_use_indicator','alcohol_use_indicator','customer_type']
+gscPythonOptions = {
+"url": "jdbc:postgresql://10.35.12.194:5432/gpadmin",
+"user": "gpcustcoe",
+"password": "gpcustcoe@123",
+"dbschema":"customermart",
+"dbtable": "customer_demographics",
+"server.port": "1151-1171"}
+cd = sqlContext.read.format("greenplum").options(**gscPythonOptions).load()\
+         .selectExpr(col_str).drop_duplicates()
+
+cd.columns
+
+cd = cd.withColumn('tobacco_use_indicator_flag', when(col('tobacco_use_indicator').isin(True), lit(1)).otherwise(lit(0)))\
+.withColumn('alcohol_use_indicator_flag', when(col('alcohol_use_indicator').isin(True), lit(1)).otherwise(lit(0)))
+from pyspark.sql import functions as F
+cd = cd.withColumn('age', (F.months_between(current_date(), F.col('birth_date')) / 12).cast('int'))
+cd = cd.withColumn('senior_citizen', when(col('age')>=60, lit(1)).otherwise(lit(0)))
+
+mot_hlt=mot_hlt.join(cd,'golden_id',"left_outer").drop(cd.golden_id)
+
+# mot_hlt=mot_hlt.filter(upper(col('customer_type'))!='C')
+
+col_str=["golden_id",'service_level','payment_behaviour']
+gscPythonOptions = {
+"url": "jdbc:postgresql://10.35.12.194:5432/gpadmin",
+"user": "gpcustcoe",
+"password": "gpcustcoe@123",
+"dbschema":"customermart",
+"dbtable": "customer_profile",
+"server.port": "1151-1171"}
+cp = sqlContext.read.format("greenplum").options(**gscPythonOptions).load()\
+         .selectExpr(col_str)
+cp.columns
+
+cp = cp.withColumn('hni_flag', when(col('service_level').isin('5'), lit('HNI')).otherwise(lit(None)))\
+.withColumn('is_hni', when(col('hni_flag').isin('HNI'), lit(1)).otherwise(lit(0)))
+
+mot_hlt=mot_hlt.join(cp, 'golden_id',"left_outer")
+
+col_str=["risk1","reference_num"]
+df_hlt_tbl=load_gpdb_jdbc(col_str,"policy_dh_risk_details_hlt",'public')
+
+df_hlt_tbl.createOrReplaceTempView('df_hlt1')
+
+query2 = """
+select reference_num,sum(dependent_child) dependent_child,sum(dependent_parents) dependent_parents from (
+select reference_num ,
+case when lower(risk1) like '%child%' then 1 else 0 end dependent_child,
+case when lower(risk1) like '%parent%' then 1 else 0 end dependent_parents
+from df_hlt1) as a 
+group by reference_num"""
+
+df_hlt = sqlContext.sql(query2)
+sqlContext.dropTempTable('df_hlt1')
+
+mot_hlt=mot_hlt.join(df_hlt, 'reference_num',"left_outer")
+
+col_str=["dc_unified_id"]
+gscPythonOptions = {
+"url": "jdbc:postgresql://10.35.12.194:5432/gpadmin",
+"user": "gpcustcoe",
+"password": "gpcustcoe@123",
+"server.port": "1151-1170",
+"dbschema":"customermart",
+"dbtable": "cross_sell_eligible_cust"}
+df_csec = sqlContext.read.format("greenplum").options(**gscPythonOptions).load()\
+         .selectExpr(col_str)
+df_csec.columns
+
+df_csec=df_csec.withColumn('cross_sell_eligible_cust', when(col('dc_unified_id').isNotNull(), lit(1)).otherwise(lit(0)))
+
+# df_csec.persist()
+# df_csec.count()
+
+mot_hlt=mot_hlt.join(df_csec, mot_hlt.golden_id==df_csec.dc_unified_id,"left_outer").drop(df_csec.dc_unified_id)
+
+col_str=["policy_no", "renewal_prop_final_buckets","segment","month"]
+gscPythonOptions = {
+"url": "jdbc:postgresql://10.35.12.194:5432/gpadmin",
+"user": "gpcustcoe",
+"password": "gpcustcoe@123",
+"server.port": "1151-1170",
+"dbschema":"customermart",
+"dbtable": "propensity_score_jan_23_jan_24"}
+ps = sqlContext.read.format("greenplum").options(**gscPythonOptions).load()\
+         .selectExpr(col_str)
+ps.columns
+
+ps=ps.withColumn('month',to_date(col('month'),'MMM-yy'))
+
+from pyspark.sql.window import Window
+
+ps = ps.withColumn("rn", F.row_number()
+        .over(Window.partitionBy('policy_no')
+        .orderBy(F.col("month").desc())))
+
+ps = ps.filter(F.col("rn") == 1).drop("rn")
+
+ps=ps.withColumn('renewal_propensity',concat(col('segment'),lit("("),col("renewal_prop_final_buckets"),lit(")")))
+
+ps=ps.select('policy_no','renewal_propensity','month')
+
+ps=ps.withColumn('policy_no',lpad(trim(col('policy_no')),10,'0'))
+
+# ps.persist()
+# ps.count()
+
+mot_hlt=mot_hlt.join(ps, mot_hlt.policy_number==ps.policy_no,"left_outer").drop(ps.policy_no)
+
+col_str=['dc_unified_id as golden_id','pstincomingcity as city','pstincomingstate as state','pstincomingpin as pincode']
+gscPythonOptions = {
+"url": "jdbc:postgresql://10.35.12.194:5432/gpadmin",
+"user": "gpcustcoe",
+"password": "gpcustcoe@123",
+"server.port": "1151-1170",
+"dbschema": "public",
+"dbtable": "mastercraft_master_prod"}
+df_mc = sqlContext.read.format("greenplum").options(**gscPythonOptions).load()\
+                    .selectExpr(col_str)
+
+
+df_mc=df_mc.withColumn('city',regexp_replace(col('city'),"[^a-zA-Z0-9 ]+",""))\
+.withColumn('state',regexp_replace(col('state'),"[^a-zA-Z0-9 ]+",""))
+
+mot_hlt=mot_hlt.join(df_mc,'golden_id',"left_outer")
+
+col_str=['reference_num','pa_si','ncb_discount']
+gscPythonOptions = {
+"url": "jdbc:postgresql://10.35.12.194:5432/gpadmin",
+"user": "gpspark",
+"password": "spark@456",
+"server.port": "1151-1170",
+"dbschema": "public",
+"dbtable": "policy_dh_risk_headers_mot"}
+df_pa_si = sqlContext.read.format("greenplum").options(**gscPythonOptions).load()\
+                    .selectExpr(col_str)
+
+mot_hlt=mot_hlt.join(df_pa_si,'reference_num',"left_outer")
+
+mot_hlt=mot_hlt.withColumn('accidental_deathrider_flag', when(col('accidentaldeathrider').isNotNull(), lit(1)).otherwise(lit(0)))
+
+mot_hlt=mot_hlt.withColumn("payment_behaviour",when(upper(col("payment_behaviour")) == 'DA', 'DA DEBIT AUTHORIZATION')\
+.when(upper(col("payment_behaviour")) == 'D', 'DEMAND DRAFT')\
+.when(upper(col("payment_behaviour")) == 'IR', 'INWARD REMITTANCE')\
+.when(upper(col("payment_behaviour")) == 'RT', 'RTGS/NEFT')\
+.when(upper(col("payment_behaviour")) == 'C', 'CHEQUE')\
+.when(upper(col("payment_behaviour")) == 'S', 'CASH')\
+.when(upper(col("payment_behaviour")) == 'CA', 'DEBIT/CREDIT CARD')\
+.otherwise(upper(col("payment_behaviour"))))
+
+lst_cancelled=['ACDC',
+'ACDE',
+'APC',
+'APCP',
+'APD',
+'APRI',
+'APU',
+'DCC',
+'ECDU',
+'ECN',
+'ECR',
+'EPCE',
+'ERFC',
+'NCN',
+'RCN']
+
+mot_hlt=mot_hlt.withColumn('record_type_desc', when((col('status').isin(lst_cancelled)),lit('CANCELLATION'))\
+                           .otherwise(col('record_type_desc')))
+
+mot_hlt=mot_hlt.withColumn('policy_cnt', when(col('record_type_desc').isin('CANCELLATION'),lit(0))\
+                                         .when(col('record_type_desc').isin('NEW BUSINESS'),lit(1))\
+                                         .when(col('record_type_desc').isin('RENEWAL BUSINESS'),lit(1))\
+                                         .when(col('record_type_desc').isin('ENDORSEMENT'),lit(1))\
+                           .otherwise(lit(1)))
+
+mot_hlt=mot_hlt.withColumn('sum_insured', when(col('record_type_desc').isin('CANCELLATION'),lit(0))\
+                           .otherwise(col('sum_insured')))\
+.withColumn('premiumamount', when(col('record_type_desc').isin('CANCELLATION'),lit(0))\
+                           .otherwise(col('premiumamount')))\
+.withColumn('total_premium', when(col('record_type_desc').isin('CANCELLATION'),lit(0))\
+                           .otherwise(col('premiumamount')))
+
+
+mot_hlt = mot_hlt.withColumn('sum_insured_bucket', when((col('sum_insured') <=500000), lit('Upto 5 lacs'))\
+                             .when((col('sum_insured') >500000) & (col('sum_insured') <=700000), lit('5 - 7 lacs'))\
+                             .when((col('sum_insured') >700000) & (col('sum_insured') <=1000000), lit( '7 - 10 lacs'))\
+                             .when((col('sum_insured') >1000000) & (col('sum_insured') <=1500000), lit('10 -15 lacs'))\
+                             .when((col('sum_insured') >1500000) & (col('sum_insured') <=2000000), lit('15 - 20 lacs'))\
+                             .when((col('sum_insured') >2000000) & (col('sum_insured') <=3000000), lit('20 - 30 lacs'))\
+                             .when((col('sum_insured') >3000000) & (col('sum_insured') <=4000000), lit('30 - 40 lacs'))\
+                             .when((col('sum_insured') >4000000) & (col('sum_insured') <=6000000), lit('40 - 60 lacs'))\
+                             .when((col('sum_insured') >6000000) & (col('sum_insured') <=8000000), lit('60 - 80 lacs'))\
+                             .when((col('sum_insured') >8000000) & (col('sum_insured') <=10000000), lit('80 lacs to 1 cr'))\
+                             .when((col('sum_insured') >=10000000), lit('Above 1 cr'))\
+                                .otherwise(lit(None)))\
+.withColumn('ncb_discount_bucket', when(col('ncb_percent').between(1, 10), lit('1-10 percent'))\
+                   .when(col('ncb_percent').between(11, 25), lit('11-25 percent'))\
+                   .when(col('ncb_percent').between(26, 50), lit('26-50 percent'))\
+                   .when(col('ncb_percent').between(51, 75), lit('51-75 percent'))\
+                   .when(col('ncb_percent')>75,lit('>75'))
+                   .otherwise(lit(None)))\
+.withColumn('exshowroomprice_bucket', when((col('exshowroomprice') <=500000), lit('Upto 5 lacs'))\
+                             .when((col('exshowroomprice') >500000) & (col('exshowroomprice') <= 700000), lit('5 - 7 lacs'))\
+                             .when((col('exshowroomprice') >700000) & (col('exshowroomprice') <= 1000000), lit( '7 - 10 lacs'))\
+                             .when((col('exshowroomprice') >1000000) & (col('exshowroomprice') <=1500000), lit('10 -15 lacs'))\
+                             .when((col('exshowroomprice') >1500000) & (col('exshowroomprice') <=2000000), lit('15 - 20 lacs'))\
+                             .when((col('exshowroomprice') >2000000) & (col('exshowroomprice') <=3000000), lit('20 - 30 lacs'))\
+                             .when((col('exshowroomprice') >3000000) & (col('exshowroomprice') <=4000000), lit('30 - 40 lacs'))\
+                             .when((col('exshowroomprice') >4000000) & (col('exshowroomprice') <=6000000), lit('40 - 60 lacs'))\
+                             .when((col('exshowroomprice') >6000000) & (col('exshowroomprice') <=8000000), lit('60 - 80 lacs'))\
+                             .when((col('exshowroomprice') >8000000) & (col('exshowroomprice') <=10000000), lit('80 lacs to 1 cr'))\
+                             .when((col('exshowroomprice') >10000000), lit('Above 1 cr'))\
+                              .otherwise(lit(None)))\
+.withColumn('times_renewed_cnt_bucket', when((col('times_renewed_cnt') >=0) & (col('times_renewed_cnt') <=3), lit('0 - 3 years'))\
+                             .when((col('times_renewed_cnt') >=4) & (col('times_renewed_cnt') <=5), lit('4 - 5 years'))\
+                             .when((col('times_renewed_cnt') >5) & (col('times_renewed_cnt') <=7), lit('6 - 7 years'))\
+                             .when((col('times_renewed_cnt') >7) & (col('times_renewed_cnt') <=10), lit('8 - 10 years'))\
+                             .when((col('times_renewed_cnt') >10) & (col('times_renewed_cnt') <=15), lit('11 - 15 years'))\
+                             .when(col('times_renewed_cnt') > 15, lit('Above 15 years'))\
+                            .otherwise(lit(None)))\
+.withColumn('premiumamount_bucket', when((col('premiumamount') <=8000), lit('Upto 8k'))\
+                             .when((col('premiumamount') >8000) & (col('premiumamount') <=700000), lit('8k- 7 lacs'))\
+                             .when((col('premiumamount') >700000) & (col('premiumamount') <=1000000), lit( '7 - 10 lacs'))\
+                             .when((col('premiumamount') >1000000) & (col('premiumamount') <=1500000), lit('10 -15 lacs'))\
+                             .when((col('premiumamount') >1500000) & (col('premiumamount') <=2000000), lit('15 - 20 lacs'))\
+                             .when((col('premiumamount') >2000000) & (col('premiumamount') <=3000000), lit('20 - 30 lacs'))\
+                             .when((col('premiumamount') >3000000) & (col('premiumamount') <=4000000), lit('30 - 40 lacs'))\
+                             .when((col('premiumamount') >4000000) & (col('premiumamount') <=6000000), lit('40 - 60 lacs'))\
+                             .when((col('premiumamount') >6000000) & (col('premiumamount') <=8000000), lit('60 - 80 lacs'))\
+                             .when((col('premiumamount') >8000000) & (col('premiumamount') <=10000000), lit('80 lacs to 1 cr'))\
+                             .when((col('premiumamount') >=10000000) , lit('Above 1 cr'))\
+                             .otherwise(lit(None)))\
+.withColumn('total_premium_bucket', when((col('total_premium') <=8000), lit('Upto 8k'))\
+                             .when((col('total_premium') >8000) & (col('total_premium') <=700000), lit('8K - 7 lacs'))\
+                             .when((col('total_premium') >700000) & (col('total_premium') <=1000000), lit( '7 - 10 lacs'))\
+                             .when((col('total_premium') >1000000) & (col('total_premium') <=1500000), lit('10 -15 lacs'))\
+                             .when((col('total_premium') >1500000) & (col('total_premium') <=2000000), lit('15 - 20 lacs'))\
+                             .when((col('total_premium') >2000000) & (col('total_premium') <=3000000), lit('20 - 30 lacs'))\
+                             .when((col('total_premium') >3000000) & (col('total_premium') <=4000000), lit('30 - 40 lacs'))\
+                             .when((col('total_premium') >4000000) & (col('total_premium') <=6000000), lit('40 - 60 lacs'))\
+                             .when((col('total_premium') >6000000) & (col('total_premium') <=8000000), lit('60 - 80 lacs'))\
+                             .when((col('total_premium') >8000000) & (col('total_premium') <=10000000), lit('80 lacs to 1 cr'))\
+                             .when((col('total_premium') >=10000000), lit('Above 1 cr'))
+                                .otherwise(lit(None)))\
+.withColumn('age_bucket', when((col('age') >=0) & (col('age') <=18), lit('0 - 18 years'))\
+                             .when((col('age') >=19) & (col('age') <=25), lit('19 - 25 years'))\
+                             .when((col('age') >=26) & (col('age') <=35), lit('26 - 35 years'))\
+                             .when((col('age') >=36) & (col('age') <=45), lit('36 - 45 years'))\
+                             .when((col('age') >=46) & (col('age') <=50), lit('46 - 50 years'))\
+                             .when((col('age') >=51) & (col('age') <=55), lit('51 - 55 years'))\
+                             .when((col('age') >=56) & (col('age') <=60), lit('56 - 60 years'))\
+                             .when((col('age') >=61) & (col('age') <=65), lit('61 - 65 years'))\
+                             .when((col('age') >=66) & (col('age') <=70), lit('66 - 70 years'))\
+                             .when(col('age') > 75, lit('75+ years')).otherwise(lit(None)))\
+.withColumn('uw_discount_bucket', when((col('uw_discount') >=0) & (col('uw_discount') <=30), lit('0-30'))\
+                             .when((col('uw_discount') >=31) & (col('uw_discount') <=45), lit('31-45'))\
+                             .when((col('uw_discount') >45) & (col('uw_discount') <=55), lit('46-55'))\
+                             .when((col('uw_discount') >55) & (col('uw_discount') <=60), lit('56-60'))\
+                             .when((col('uw_discount') >60) & (col('uw_discount') <=65), lit('61-65'))\
+                             .when((col('uw_discount') >65) & (col('uw_discount') <=70), lit('66-70'))\
+                             .when((col('uw_discount') >70)& (col('uw_discount') <=75), lit('71-75'))\
+                             .when((col('uw_discount') >75) & (col('uw_discount') <=80), lit('76-80'))\
+                             .when(col('uw_discount') >80, lit('Above 80')).otherwise(lit(None)))\
+.withColumn('ncb_flag', when(col('ncb_percent')>0, lit('1')).otherwise(lit('0')))\
+.withColumn('ncb_discount',col('ncb_percent'))
+
+
+
+mot_hlt = mot_hlt.withColumn('sum_insured_bucket_enum', when((col('sum_insured') <=500000), lit(1))\
+                             .when((col('sum_insured') >500000) & (col('sum_insured') <=700000), lit(2))\
+                             .when((col('sum_insured') >700000) & (col('sum_insured') <=1000000), lit(3))\
+                             .when((col('sum_insured') >1000000) & (col('sum_insured') <=1500000), lit(4))\
+                             .when((col('sum_insured') >1500000) & (col('sum_insured') <=2000000), lit(5))\
+                             .when((col('sum_insured') >2000000) & (col('sum_insured') <=3000000), lit(6))\
+                             .when((col('sum_insured') >3000000) & (col('sum_insured') <=4000000), lit(7))\
+                             .when((col('sum_insured') >4000000) & (col('sum_insured') <=6000000), lit(8))\
+                             .when((col('sum_insured') >6000000) & (col('sum_insured') <=8000000), lit(9))\
+                             .when((col('sum_insured') >8000000) & (col('sum_insured') <=10000000), lit(10))\
+                             .when((col('sum_insured') >=10000000), lit(11))\
+                                .otherwise(lit(11)))\
+.withColumn('ncb_discount_bucket_enum', when(col('ncb_percent').between(1, 10), lit(1))\
+                   .when(col('ncb_percent').between(11, 25), lit(2))\
+                   .when(col('ncb_percent').between(26, 50), lit(3))\
+                   .when(col('ncb_percent').between(51, 75), lit(4))\
+                   .when(col('ncb_percent')>75,lit(5))
+                   .otherwise(lit(6)))\
+.withColumn('exshowroomprice_bucket_enum', when((col('exshowroomprice') <=500000), lit(1))\
+                             .when((col('exshowroomprice') >500000) & (col('exshowroomprice') <= 700000), lit(2))\
+                             .when((col('exshowroomprice') >700000) & (col('exshowroomprice') <= 1000000), lit(3))\
+                             .when((col('exshowroomprice') >1000000) & (col('exshowroomprice') <=1500000), lit(4))\
+                             .when((col('exshowroomprice') >1500000) & (col('exshowroomprice') <=2000000), lit(5))\
+                             .when((col('exshowroomprice') >2000000) & (col('exshowroomprice') <=3000000), lit(6))\
+                             .when((col('exshowroomprice') >3000000) & (col('exshowroomprice') <=4000000), lit(7))\
+                             .when((col('exshowroomprice') >4000000) & (col('exshowroomprice') <=6000000), lit(8))\
+                             .when((col('exshowroomprice') >6000000) & (col('exshowroomprice') <=8000000), lit(9))\
+                             .when((col('exshowroomprice') >8000000) & (col('exshowroomprice') <=10000000), lit(10))\
+                             .when((col('exshowroomprice') >10000000), lit(11))\
+                              .otherwise(lit(12)))\
+.withColumn('times_renewed_cnt_bucket_enum', when((col('times_renewed_cnt') >=0) & (col('times_renewed_cnt') <=3), lit(1))\
+                             .when((col('times_renewed_cnt') >=4) & (col('times_renewed_cnt') <=5), lit(2))\
+                             .when((col('times_renewed_cnt') >5) & (col('times_renewed_cnt') <=7), lit(3))\
+                             .when((col('times_renewed_cnt') >7) & (col('times_renewed_cnt') <=10), lit(4))\
+                             .when((col('times_renewed_cnt') >10) & (col('times_renewed_cnt') <=15), lit(5))\
+                             .when(col('times_renewed_cnt') > 15, lit(6))\
+                            .otherwise(lit(7)))\
+.withColumn('premiumamount_bucket_enum', when((col('premiumamount') <=8000), lit(1))\
+                             .when((col('premiumamount') >8000) & (col('premiumamount') <=700000), lit(2))\
+                             .when((col('premiumamount') >700000) & (col('premiumamount') <=1000000), lit(3))\
+                             .when((col('premiumamount') >1000000) & (col('premiumamount') <=1500000), lit(4))\
+                             .when((col('premiumamount') >1500000) & (col('premiumamount') <=2000000), lit(5))\
+                             .when((col('premiumamount') >2000000) & (col('premiumamount') <=3000000), lit(6))\
+                             .when((col('premiumamount') >3000000) & (col('premiumamount') <=4000000), lit(7))\
+                             .when((col('premiumamount') >4000000) & (col('premiumamount') <=6000000), lit(8))\
+                             .when((col('premiumamount') >6000000) & (col('premiumamount') <=8000000), lit(9))\
+                             .when((col('premiumamount') >8000000) & (col('premiumamount') <=10000000), lit(10))\
+                             .when((col('premiumamount') >=10000000) , lit(11))\
+                             .otherwise(lit(12)))\
+.withColumn('total_premium_bucket_enum', when((col('total_premium') <=8000), lit(1))\
+                             .when((col('total_premium') >8000) & (col('total_premium') <=700000), lit(2))\
+                             .when((col('total_premium') >700000) & (col('total_premium') <=1000000), lit(3))\
+                             .when((col('total_premium') >1000000) & (col('total_premium') <=1500000), lit(4))\
+                             .when((col('total_premium') >1500000) & (col('total_premium') <=2000000), lit(5))\
+                             .when((col('total_premium') >2000000) & (col('total_premium') <=3000000), lit(6))\
+                             .when((col('total_premium') >3000000) & (col('total_premium') <=4000000), lit(7))\
+                             .when((col('total_premium') >4000000) & (col('total_premium') <=6000000), lit(8))\
+                             .when((col('total_premium') >6000000) & (col('total_premium') <=8000000), lit(9))\
+                             .when((col('total_premium') >8000000) & (col('total_premium') <=10000000), lit(10))\
+                             .when((col('total_premium') >=10000000), lit(11))
+                                .otherwise(lit(12)))\
+.withColumn('age_bucket_enum', when((col('age') >=0) & (col('age') <=18), lit(1))\
+                             .when((col('age') >=19) & (col('age') <=25), lit(2))\
+                             .when((col('age') >=26) & (col('age') <=35), lit(3))\
+                             .when((col('age') >=36) & (col('age') <=45), lit(4))\
+                             .when((col('age') >=46) & (col('age') <=50), lit(5))\
+                             .when((col('age') >=51) & (col('age') <=55), lit(6))\
+                             .when((col('age') >=56) & (col('age') <=60), lit(7))\
+                             .when((col('age') >=61) & (col('age') <=65), lit(8))\
+                             .when((col('age') >=66) & (col('age') <=70), lit(9))\
+                             .when(col('age') > 75, lit(10)).otherwise(lit(11)))
+
+
+mot_hlt=mot_hlt.withColumnRenamed('policy_number','policy_no').withColumnRenamed('reference_num','proposal_no')\
+.withColumnRenamed('source_system_customer_id','customer_id')\
+.withColumnRenamed('channel','sub_channel')\
+.withColumnRenamed('commit_timestamp','binddate')
+
+mot_hlt=mot_hlt.withColumn('policy_expiry_month',date_format(col('pol_exp_date'),'MMM-yyyy'))\
+.withColumn('policy_inception_month',date_format(col('pol_incept_date'),'MMM-yyyy'))\
+.withColumn('claimant_policy_flag',when(col('claim_cnt') >0, lit(1)).otherwise(lit(0)))
+
+from pyspark.sql.window import Window
+
+mot_hlt = mot_hlt.withColumn("rn", F.row_number()
+        .over(Window.partitionBy('source_system_name', 'policy_no', 'certificate_no','pol_incept_date', 'pol_exp_date')
+        .orderBy(F.col("binddate").desc(),F.col("proposal_no").desc())))
+
+mot_hlt = mot_hlt.filter(F.col("rn") == 1).drop("rn")
+
+mot_hlt=mot_hlt.withColumnRenamed('channel_new_2','channel')
+
+mot_hlt.columns
+
+mot_hlt=mot_hlt.withColumn('marital_status',when((col('marital_status').isin('Unknown','1951','--SELECT--','UNKNOWN','-'))|(col('marital_status').isNull()),lit('NA'))
+                          .when(col('marital_status').isin('TRUE','Married','"MARRIED "','M'),lit('Married'))\
+                          .when(col('marital_status').isin('Single','0','S','SINGLE'),lit('Unmarried'))
+                          .when(col('marital_status').isin('WIDOWED','W'),lit('Widow'))
+                          .when(lower(trim(col("marital_status"))).rlike("\\s"),lit('Married'))\
+                           .otherwise(col('marital_status'))).withColumn('marital_status',upper(col('marital_status')))
+
+mot_hlt=mot_hlt.withColumn('veh_make',when(col('veh_make').isin('{CODE=1162, NAME=BAJAJ}'),lit('BAJAJ'))
+.when(col('veh_make').isin('{CODE=1179, NAME=HERO}'),lit('HERO'))
+.when(col('veh_make').isin('{CODE=1181, NAME=HERO HONDA}'),lit('HERO HONDA'))
+.when(col('veh_make').isin('{CODE=1182, NAME=HERO MOTOCORP}'),lit('HERO MOTOCORP'))
+.when(col('veh_make').isin('{CODE=1183, NAME=HONDA}'),lit('HONDA'))
+.when(col('veh_make').isin('{CODE=1188, NAME=KEEWAY}'),lit('KEEWAY'))
+.when(col('veh_make').isin('{CODE=1207, NAME=TVS}'),lit('TVS'))
+.when(col('veh_make').isin('{CODE=1202, NAME=SUZUKI}'),lit('SUZUKI'))
+.when(col('veh_make').isin('{CODE=1212, NAME=YAMAHA}'),lit('YAMAHA')).otherwise(col('veh_make')))
+
+mot_hlt=mot_hlt.withColumn('lob',when(col('lob').isin('Pvt Car'),lit('MOTOR-PC'))
+.when(col('lob').isin('2W'),lit('MOTOR-TW'))
+.when(col('lob').isin('Health Benefit','Mediseries','Covid Health'),lit('HEALTH-Retail')).otherwise(col('lob')))
+
+mot_hlt.persist(pyspark.StorageLevel.MEMORY_AND_DISK)
+records=mot_hlt.count()
+records
+
+mot_hlt.columns
+
+mot_hlt=mot_hlt.selectExpr('proposal_no', 'golden_id', 'customer_id', 'policy_no', 'certificate_no', 'pol_incept_date', 'pol_exp_date', 'source_system_name', 'sum_insured', 'premiumamount', 'total_premium', 'product_name', 'sub_channel', 'channel', 'lob', 'record_type_desc', 'record_type_cd', 'report_accounting_period', 'binddate', 'renl_cert_no', 'times_renewed_cnt', 'product_cd', 'product_cd_new', 'producer_cd', 'producername', 'producer_type', 'policy_counter', 'veh_model', 'veh_age', 'veh_make', 'veh_body', 'veh_engine_no', 'veh_chassis_no', 'no_claim_bonus', 'policy_type', 'fuel_type', 'uw_discount', 'uw_loading', 'business_type', 'txt_business_type', 'no_of_lives', 'veh_no', 'segment_type', 'policy_variant', 'mfg_year', 'ncb_percent', 'discount', 'major_line_cd', 'minor_line_cd', 'main_lob', 'pol_status_cd', 'group_category', 'min_pol_incept_date', 'plan_type', 'break_in_insurance_flag', 'break_in_insurance_days', 'exshowroomprice', 'irda_product_uin', 'txt_active_flag', 'status', 'txt_intermediary_cd', 'txt_status', 'accidentaldeathrider', 'rider_applicable', 'coverage_opted', 'age_building', 'personal_accident', 'public_lia', 'trip_type', 'trv_limit', 'purpose_of_trip', 'dep_date', 'return_date', 'travel_duration', 'destination_country', 'trip', 'lta_zone', 'information280', 'ped_declared_indicator', 'portability_required', 'deductible_amount', 'cumulative_bonus_earned', 'orphan_policy_indicator', 'orphan_policy_date', 'policy_term', 'ncb_flag', 'portability_indicator', 'renewed_in_grace_period', 'display_product_cd', 'insert_date', 'claim_gross', 'claim_cnt', 'max_policy_end_date', 'customer_vintage', 'communication_type', 'value', 'mobile_contactibility', 'email_contactibility', 'birth_date', 'gender', 'marital_status', 'tobacco_use_indicator', 'alcohol_use_indicator', 'customer_type', 'tobacco_use_indicator_flag', 'alcohol_use_indicator_flag', 'age', 'senior_citizen', 'service_level', 'payment_behaviour', 'hni_flag', 'is_hni', 'dependent_child', 'dependent_parents', 'cross_sell_eligible_cust', 'renewal_propensity', 'month', 'city', 'state', 'pincode', 'pa_si', 'ncb_discount', 'accidental_deathrider_flag', 'policy_cnt', 'sum_insured_bucket', 'ncb_discount_bucket', 'exshowroomprice_bucket', 'times_renewed_cnt_bucket', 'premiumamount_bucket', 'total_premium_bucket', 'age_bucket', 'uw_discount_bucket', 'sum_insured_bucket_enum', 'ncb_discount_bucket_enum', 'exshowroomprice_bucket_enum', 'times_renewed_cnt_bucket_enum', 'premiumamount_bucket_enum', 'total_premium_bucket_enum', 'age_bucket_enum', 'policy_expiry_month', 'policy_inception_month', 'claimant_policy_flag',
+"policy_cnt as policy_renewal_count", "claim_gross as claim_net", "renewal_propensity as renewal_propensity_segment", 
+"discount as discount_per")
+
+mot_hlt=mot_hlt.withColumn('insert_datetime',current_timestamp())
+
+output_index = 'cpa_all_prod'#cpa_all_prod_fy20,cpa_all_prod_fy21cpa_all_production_2
+schema = 'customermart'
+
+import sys
+try:
+    
+     mot_hlt.write.option("truncate", "true").format("greenplum")\
+    .option("dbtable",output_index).option('dbschema',schema)\
+    .option("server.port","1150-1170").option("url",prod_url)\
+    .option("user", user_prod).option("password",pwd_prod).mode('overwrite').save()
+    
+    
+except Exception as e:
+    x = e
+    print(x)
+else:
+    x = 'success'
+    print(x)
+
+import io
+import pandas as pd
+import xlsxwriter
+import sys
+import smtplib
+from os.path import basename
+from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.utils import COMMASPACE, formatdate
+import pandas as pd
+from sqlalchemy import create_engine
+from smtplib import SMTP
+
+if x!='success':
+    status='FAILED'
+else:
+    status="SUCCESS"
+
+subject=f"Automated Mail-CPA Job Status : {status}"
+
+if x==200:
+    recipients = ['nishant5.addenki@tataaig.com','devnandan.TataIndustries@tataaig.com','mayur.TataIndustries@tataaig.com','Ajeet3.Jaiswal@tataaig.com'] 
+    emaillist = [elem.strip().split(',') for elem in recipients]
+    msg = MIMEMultipart()
+    msg['Subject'] = subject
+    msg['From'] = 'customercoe@tataaig.com'
+
+
+    html = """\
+    <html>
+      <head></head>
+      <body>
+        CPA job status is: Successful
+      </body>
+        <p>This is automated mail, please don't reply. Thanks</p>
+    </html>
+    """
+
+    part1 = MIMEText(html, 'html')
+    msg.attach(part1)
+
+    server = smtplib.SMTP("tataaig-com.mail.protection.outlook.com",25)
+    server.sendmail(msg['From'], emaillist , msg.as_string())
+else:
+      
+    recipients = ['nishant5.addenki@tataaig.com','devnandan.TataIndustries@tataaig.com','mayur.TataIndustries@tataaig.com','Ajeet3.Jaiswal@tataaig.com'] 
+    emaillist = [elem.strip().split(',') for elem in recipients]
+    msg = MIMEMultipart()
+    msg['Subject'] = subject
+    msg['From'] = 'customercoe@tataaig.com'
+
+
+    html = """\
+    <html>
+      <head></head>
+      <body>
+        CPA job status is: Failed
+      </body>
+        <p>This is automated mail, please don't reply. Thanks</p>
+    </html>
+    """
+
+    part1 = MIMEText(html, 'html')
+    msg.attach(part1)
+
+    server = smtplib.SMTP("tataaig-com.mail.protection.outlook.com",25)
+    server.sendmail(msg['From'], emaillist , msg.as_string())
+
+
+
+spark.stop()
+
+
